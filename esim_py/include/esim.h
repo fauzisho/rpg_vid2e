@@ -13,7 +13,7 @@ struct Event
   : x_(x), y_(y), t_(t), polarity_(polarity)
   {}
 
-  bool operator<(Event& other)
+  bool operator<(const Event& other) const
   {
     return t_ < other.t_;
   }

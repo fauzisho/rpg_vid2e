@@ -1,7 +1,7 @@
 import os
 try:
     import esim_py
-    print("Installation sucessful!")
+    print("Installation successful!")
 except ImportError:
     print("esim_py not found, importing binaries. These do not correspond to source files in this repo")
     import sys
