@@ -39,6 +39,53 @@ def frame_rgb(
     return np.stack([r, g, b], axis=-1)
 
 
+def render_events_gif(
+    npz_path: Path,
+    out_path: Path,
+    *,
+    frames: int = 40,
+    gif_fps: float = 12.0,
+    scale: int = 2,
+) -> None:
+    """Write an animated GIF from events.npz to out_path."""
+    d = np.load(npz_path)
+    x = d["x"].astype(np.int64)
+    y = d["y"].astype(np.int64)
+    t = d["t"].astype(np.float64)
+    p = d["p"].astype(np.float64)
+
+    t0, t1 = float(t.min()), float(t.max())
+    if t1 <= t0:
+        raise ValueError("Need a positive time span in events.")
+
+    width = int(x.max()) + 1
+    height = int(y.max()) + 1
+
+    edges = np.linspace(t0, t1, frames + 1)
+    duration_ms = int(1000 / max(gif_fps, 1e-6))
+
+    pil_frames: list[Image.Image] = []
+    for i in range(frames):
+        lo, hi = edges[i], edges[i + 1]
+        m = (t >= lo) & (t < hi) if i < frames - 1 else (t >= lo) & (t <= hi)
+        rgb = frame_rgb(x[m], y[m], p[m], height, width)
+        im = Image.fromarray(rgb, mode="RGB")
+        if scale > 1:
+            w, h = im.size
+            im = im.resize((w * scale, h * scale), Image.Resampling.NEAREST)
+        pil_frames.append(im)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    pil_frames[0].save(
+        out_path,
+        save_all=True,
+        append_images=pil_frames[1:],
+        duration=duration_ms,
+        loop=0,
+        optimize=False,
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="events.npz → animated GIF")
     ap.add_argument(
@@ -87,42 +134,20 @@ def main() -> int:
     else:
         out_path = out_path.resolve()
 
-    d = np.load(npz_path)
-    x = d["x"].astype(np.int64)
-    y = d["y"].astype(np.int64)
-    t = d["t"].astype(np.float64)
-    p = d["p"].astype(np.float64)
-
-    t0, t1 = float(t.min()), float(t.max())
-    if t1 <= t0:
-        print("Need a positive time span.")
-        return 1
-
-    width = int(x.max()) + 1
-    height = int(y.max()) + 1
-
-    edges = np.linspace(t0, t1, args.frames + 1)
-    duration_ms = int(1000 / max(args.fps, 1e-6))
-
-    pil_frames: list[Image.Image] = []
-    for i in range(args.frames):
-        lo, hi = edges[i], edges[i + 1]
-        m = (t >= lo) & (t < hi) if i < args.frames - 1 else (t >= lo) & (t <= hi)
-        rgb = frame_rgb(x[m], y[m], p[m], height, width)
-        im = Image.fromarray(rgb, mode="RGB")
-        if args.scale > 1:
-            w, h = im.size
-            im = im.resize((w * args.scale, h * args.scale), Image.Resampling.NEAREST)
-        pil_frames.append(im)
-
-    pil_frames[0].save(
+    render_events_gif(
+        npz_path,
         out_path,
-        save_all=True,
-        append_images=pil_frames[1:],
-        duration=duration_ms,
-        loop=0,
-        optimize=False,
+        frames=args.frames,
+        gif_fps=args.fps,
+        scale=args.scale,
     )
+
+    d = np.load(npz_path)
+    t = d["t"].astype(np.float64)
+    x = d["x"]
+    t0, t1 = float(t.min()), float(t.max())
+    width = int(x.max()) + 1
+    height = int(d["y"].max()) + 1
     print(f"Wrote {out_path} ({args.frames} frames, {width}×{height} px, t ∈ [{t0:.4f}, {t1:.4f}] s)")
     return 0
 

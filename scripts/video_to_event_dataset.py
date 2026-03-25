@@ -11,6 +11,7 @@ import argparse
 import json
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -83,6 +84,101 @@ def write_timestamps(path: Path, n: int, fps: float) -> None:
     path.write_text("".join(lines))
 
 
+@dataclass
+class EventDatasetResult:
+    """Paths and stats after building events.npz from video."""
+
+    npz_path: Path
+    meta_path: Path
+    timestamps_path: Path
+    num_events: int
+    fps: float
+    num_frames: int
+
+
+def build_event_dataset(
+    video: Path,
+    out: Path,
+    *,
+    cp: float = 0.2,
+    cn: float = 0.2,
+    refractory: float = 0.0,
+    log_eps: float = 1e-3,
+    use_log: bool = True,
+    keep_frames: bool = False,
+) -> EventDatasetResult:
+    """
+    Extract frames, run ESIM, write events.npz + meta.json + timestamps.txt.
+    """
+    import numpy as np
+    import esim_py
+
+    video = video.resolve()
+    out = out.resolve()
+    out.mkdir(parents=True, exist_ok=True)
+
+    fps, probed_n = probe_video(video)
+    frames_dir = out / "frames"
+
+    n = extract_grayscale_frames(video, frames_dir)
+    if probed_n is not None and probed_n != n:
+        print(
+            f"Warning: ffprobe reported {probed_n} frames but ffmpeg extracted {n}; using {n}.",
+            file=sys.stderr,
+        )
+    ts_path = out / "timestamps.txt"
+    write_timestamps(ts_path, n, fps)
+
+    esim = esim_py.EventSimulator(cp, cn, refractory, log_eps, use_log)
+    events = esim.generateFromFolder(str(frames_dir), str(ts_path))
+
+    npz_path = out / "events.npz"
+    np.savez(
+        npz_path,
+        x=events[:, 0].astype(np.int32),
+        y=events[:, 1].astype(np.int32),
+        t=events[:, 2].astype(np.float64),
+        p=events[:, 3].astype(np.float64),
+    )
+
+    meta = {
+        "source_video": str(video),
+        "fps": fps,
+        "num_frames": n,
+        "num_events": int(events.shape[0]),
+        "contrast_threshold_pos": cp,
+        "contrast_threshold_neg": cn,
+        "refractory_period_s": refractory,
+        "log_eps": log_eps,
+        "use_log": use_log,
+        "events_file": "events.npz",
+        "timestamps_file": "timestamps.txt",
+        "format": "columns x,y,t(seconds),polarity in NPZ",
+        "snn_ready": True,
+        "snn_note": "Load with numpy.load: arrays x,y,t(sec),p (float polarity ±1). "
+        "Reshape or bin for spike tensors per your SNN framework.",
+    }
+    meta_path = out / "meta.json"
+    meta_path.write_text(json.dumps(meta, indent=2))
+
+    if not keep_frames:
+        for f in frames_dir.glob("*.png"):
+            f.unlink()
+        try:
+            frames_dir.rmdir()
+        except OSError:
+            pass
+
+    return EventDatasetResult(
+        npz_path=npz_path,
+        meta_path=meta_path,
+        timestamps_path=ts_path,
+        num_events=int(events.shape[0]),
+        fps=fps,
+        num_frames=n,
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Video → ESIM event dataset (frames + events.npz)")
     ap.add_argument("--video", "-v", type=Path, required=True, help="Input video (e.g. seq1/video.mp4)")
@@ -100,72 +196,22 @@ def main() -> int:
     args = ap.parse_args()
 
     video = args.video.resolve()
-    out = args.out.resolve()
     if not video.is_file():
         print(f"Video not found: {video}", file=sys.stderr)
         return 1
 
-    import esim_py
-
-    fps, probed_n = probe_video(video)
-    frames_dir = out / "frames"
-    out.mkdir(parents=True, exist_ok=True)
-
-    n = extract_grayscale_frames(video, frames_dir)
-    if probed_n is not None and probed_n != n:
-        print(
-            f"Warning: ffprobe reported {probed_n} frames but ffmpeg extracted {n}; using {n}.",
-            file=sys.stderr,
-        )
-    ts_path = out / "timestamps.txt"
-    write_timestamps(ts_path, n, fps)
-
-    esim = esim_py.EventSimulator(
-        args.cp,
-        args.cn,
-        args.refractory,
-        args.log_eps,
-        not args.no_log,
+    r = build_event_dataset(
+        video,
+        args.out,
+        cp=args.cp,
+        cn=args.cn,
+        refractory=args.refractory,
+        log_eps=args.log_eps,
+        use_log=not args.no_log,
+        keep_frames=args.keep_frames,
     )
-    events = esim.generateFromFolder(str(frames_dir), str(ts_path))
-
-    npz_path = out / "events.npz"
-    import numpy as np
-
-    np.savez(
-        npz_path,
-        x=events[:, 0].astype(np.int32),
-        y=events[:, 1].astype(np.int32),
-        t=events[:, 2].astype(np.float64),
-        p=events[:, 3].astype(np.float64),
-    )
-
-    meta = {
-        "source_video": str(video),
-        "fps": fps,
-        "num_frames": n,
-        "num_events": int(events.shape[0]),
-        "contrast_threshold_pos": args.cp,
-        "contrast_threshold_neg": args.cn,
-        "refractory_period_s": args.refractory,
-        "log_eps": args.log_eps,
-        "use_log": not args.no_log,
-        "events_file": "events.npz",
-        "timestamps_file": "timestamps.txt",
-        "format": "columns x,y,t(seconds),polarity in NPZ",
-    }
-    (out / "meta.json").write_text(json.dumps(meta, indent=2))
-
-    if not args.keep_frames:
-        for f in frames_dir.glob("*.png"):
-            f.unlink()
-        try:
-            frames_dir.rmdir()
-        except OSError:
-            pass
-
-    print(f"Wrote {npz_path} ({meta['num_events']} events)")
-    print(f"Meta: {out / 'meta.json'}")
+    print(f"Wrote {r.npz_path} ({r.num_events} events)")
+    print(f"Meta: {r.meta_path}")
     return 0
 
 
