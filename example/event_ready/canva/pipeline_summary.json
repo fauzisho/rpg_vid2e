@@ -1,0 +1,23 @@
+{
+  "source_video": "/Users/fauzisho/Documents/Thesis/dataset/raw/camera/rpg_vid2e/example/canva/drug.mp4",
+  "output_dir": "/Users/fauzisho/Documents/Thesis/dataset/raw/camera/rpg_vid2e/example/event_ready/canva",
+  "artifacts": {
+    "snn_dataset": {
+      "events_npz": "events.npz",
+      "meta_json": "meta.json",
+      "timestamps_txt": "timestamps.txt",
+      "description": "NPZ: x,y,t(seconds),p (\u00b11). Use numpy.load for SNN preprocessing."
+    },
+    "visualization": {
+      "events_gif": "events.gif",
+      "event_stream_jpg": "event_stream.jpg"
+    }
+  },
+  "esim": {
+    "cp": 0.2,
+    "cn": 0.2,
+    "refractory_s": 0.0,
+    "log_eps": 0.001,
+    "use_log": true
+  }
+}

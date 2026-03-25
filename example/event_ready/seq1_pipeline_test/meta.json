@@ -1,0 +1,16 @@
+{
+  "source_video": "/Users/fauzisho/Documents/Thesis/dataset/raw/camera/rpg_vid2e/example/original/seq1/video.mp4",
+  "fps": 25.0,
+  "num_frames": 9,
+  "num_events": 329793,
+  "contrast_threshold_pos": 0.2,
+  "contrast_threshold_neg": 0.2,
+  "refractory_period_s": 0.0,
+  "log_eps": 0.001,
+  "use_log": true,
+  "events_file": "events.npz",
+  "timestamps_file": "timestamps.txt",
+  "format": "columns x,y,t(seconds),polarity in NPZ",
+  "snn_ready": true,
+  "snn_note": "Load with numpy.load: arrays x,y,t(sec),p (float polarity \u00b11). Reshape or bin for spike tensors per your SNN framework."
+}
